@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 
+import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -25,7 +26,6 @@ import android.hardware.usb.UsbManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Process;
-import android.support.v7.app.ActionBarActivity;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -49,7 +49,7 @@ import jnt.scimark2.SparseCompRow;
 import jnt.scimark2.kernel;
 
 
-public class Executive extends ActionBarActivity implements SeekBar.OnSeekBarChangeListener {
+public class Executive extends Activity implements SeekBar.OnSeekBarChangeListener {
 
   /* ***********************************************************************/
   // RUN-TIME OPTIONS
@@ -88,9 +88,9 @@ public class Executive extends ActionBarActivity implements SeekBar.OnSeekBarCha
 
   // Select which SciMark benchmark application to run:
   //
-  //  SOR    Successive Over Relaxation
-  //  SMULT  Sparse Multiplication
-  //  LU     Lower-Upper Factorization
+  //  SOR     Successive Over Relaxation
+  //  SMULT   Sparse Multiplication
+  //  LU      Lower-Upper Factorization
   //
   private static final Benchmark BENCHMARK_APP = Benchmark.SOR;
 

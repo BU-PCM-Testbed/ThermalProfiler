@@ -150,7 +150,7 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
 
   // USB device fields
   private UsbManager mUsbManager;
-  private ArrayList<UsbDevice> mUsbDevices = new ArrayList<>();
+  private ArrayList<UsbDevice> mUsbDevices = new ArrayList<UsbDevice>();
   private PendingIntent mUsbPermissionIntent;
 
   // this USB device corresponds to the Agilent U1252A multimeter, which

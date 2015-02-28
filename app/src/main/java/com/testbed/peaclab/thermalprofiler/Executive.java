@@ -66,17 +66,17 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
   // Set to false to enable continuous benchmark: When you press the Benchmark
   // button, the benchmark will run forever, until you press the Benchmark button
   // again, to interrupt and stop the benchmark.
-  private static final boolean TIMED_BENCHMARK = true;
+  private static final boolean TIMED_BENCHMARK = false;
 
 
   // Set to true to allow the Benchmark thread to set the frequency of the CPU
   // core before executing the benchmark.
-  private static final boolean BENCHMARK_SETS_FREQUENCY = true;
+  private static final boolean BENCHMARK_SETS_FREQUENCY = false;
 
 
   // Set to true to allow the ThermalManagement thread to employ a thermal
   // management policy.
-  public static final boolean THERMAL_MANAGEMENT_ENABLED = true;
+  public static final boolean THERMAL_MANAGEMENT_ENABLED = false;
 
 
   /*

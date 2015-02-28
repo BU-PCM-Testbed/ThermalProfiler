@@ -67,8 +67,8 @@ public class kernel
 	    
 	    //rep = 75; // 42.5s @ 1026MHz
 	    //rep = 150; // 68s @ 1026MHz, this just fully melts PCM, at end of benchmark
-      //rep = 250; // 113s @ 1026MHz
-      //rep = 300; // 126s @ 1026MHz, using this setting in my house, PCM melts fully
+        //rep = 250; // 113s @ 1026MHz
+        //rep = 300; // 126s @ 1026MHz, using this setting in my house, PCM melts fully
 	    rep = 75;
 	    
 	    // 75  short duration

@@ -41,6 +41,7 @@ public class SensorRecorder extends Thread {
     };
   
   private static final String SENSOR_DATA_LOG_FILENAME = "stat.csv";
+  private static final String SENSOR_EVENT_LOG_FILENAME = "event.csv";
   
   private static final int AGILENT_WORD_BUFFER_LENGTH = 40; // in bytes
   private static final int AGILENT_READ_BUFFER_LENGTH = 8; // in bytes
@@ -255,7 +256,7 @@ public class SensorRecorder extends Thread {
         dataSample.temperatureCore3) / ((float)Testbed.TESTBED_NUM_CPU_CORES);
     float pcmTemperature = dataSample.temperatureThermocouple;
     float airTemperature = dataSample.temperatureAmbient;
-    
+
     // PCM energy calculations
     float dT_si  = Math.max(Math.abs(cpuTemperature - pcmTemperature), 0.3f);
     float dT_pcm = Math.max(Math.abs(pcmTemperature - airTemperature), 0.3f);
@@ -295,15 +296,15 @@ public class SensorRecorder extends Thread {
       }
     }
     
-    
+
     Log.v(TAG, 
         "T_CPU=" + String.format("%.2f", cpuTemperature) + ", " +
         "T_PCM=" + String.format("%.2f", pcmTemperature) + ", " +
         "E_PCM=" + String.format("%6.2f", mPCMEnergy)    + " (" + String.format("%.2f", mPCMEnergy_Saturated) + "), " +
         "P_net=" + String.format("%6.3f", netPower)      + ", " +
         "Rsi/pcm= " + String.format("%.3f", R_si) + ", " + String.format("%.3f", R_pcm)
-        );
-    
+    );
+
     
     return dataSample;
   }

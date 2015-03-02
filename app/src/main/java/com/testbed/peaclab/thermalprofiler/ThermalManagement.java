@@ -159,14 +159,14 @@ public class ThermalManagement extends Thread {
       
       // keep a running avg of CPU temperature
       //------------------------------------------------------------------------
-      mAvgCpuSamples[mCpuSampleIndex++] = cpuTemperature;
+      /*mAvgCpuSamples[mCpuSampleIndex++] = cpuTemperature;
       mCpuSampleIndex = (mCpuSampleIndex >= CPU_TEMP_RUNNING_AVG_SAMPLES) ? 0 : mCpuSampleIndex;
       mNumCpuSamples = (mNumCpuSamples >= CPU_TEMP_RUNNING_AVG_SAMPLES) ? CPU_TEMP_RUNNING_AVG_SAMPLES : mNumCpuSamples + 1;
       float cpuAvgTemp = 0.f;
       for (int i = 0; i < mNumCpuSamples; i++) {
         cpuAvgTemp += mAvgCpuSamples[i];
       }
-      cpuAvgTemp = cpuAvgTemp / (float)mNumCpuSamples;
+      cpuAvgTemp = cpuAvgTemp / (float)mNumCpuSamples;*/
 
       // get PCM energy
       //------------------------------------------------------------------------

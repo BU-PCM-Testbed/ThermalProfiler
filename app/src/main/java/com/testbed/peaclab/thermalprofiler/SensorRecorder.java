@@ -27,7 +27,7 @@ public class SensorRecorder extends Thread {
   private static final String TAG = "SensorRecorder";
   
   // set the recording interval, in milliseconds
-  private static final int SAMPLING_INTERVAL_MS = 1000;
+  private static final int SAMPLING_INTERVAL_MS = 500;
   
   // set the default number of data elements to store
   private static final int DEFAULT_SAMPLE_STORAGE = 600;
@@ -42,11 +42,6 @@ public class SensorRecorder extends Thread {
   
   private static final String SENSOR_DATA_LOG_FILENAME = "stat.csv";
   private static final String SENSOR_EVENT_LOG_FILENAME = "event.csv";
-  
-  private static final int AGILENT_WORD_BUFFER_LENGTH = 40; // in bytes
-  private static final int AGILENT_READ_BUFFER_LENGTH = 8; // in bytes
-  private static final byte AGILENT_START_BYTE = 0x0A;
-  private static final byte AGILENT_STOP_BYTE = 0x0D;
   
 
   public static final float PCM_MELTING_TEMP = 55.f;
@@ -70,6 +65,7 @@ public class SensorRecorder extends Thread {
   private UsbManager mUsbManager;
   private UsbDevice mAgilentDevice;
   private UsbSerialPort mAgilentPort;
+  private AgilentSampler mAgilentSamplerThread;
   
   // keep track of how many samples have been recorded
   private int mSampleCounter;
@@ -137,7 +133,6 @@ public class SensorRecorder extends Thread {
     // attempt to create file handles for CPU core temperatures
     try {
       openCoreTemperatureFiles();
-      openAgilentPort();
     } catch (Throwable e) {
       Log.e(e.getClass().toString(), e.getMessage(), e);
       mTerminate = true;
@@ -145,10 +140,11 @@ public class SensorRecorder extends Thread {
     
     try {
       openAgilentPort();
-    } catch (IOException e) {
+      sleep(300);
+    } catch (Throwable e) {
       Log.e(e.getClass().toString(), e.getMessage(), e);
     }
-    
+
     while (!mTerminate) {
       // start loop
       T_start = System.currentTimeMillis();
@@ -182,6 +178,8 @@ public class SensorRecorder extends Thread {
       mRecordSensors_prev = recordState;
       T_stop = System.currentTimeMillis();
       T_prev = T_start;
+
+      //Log.d(TAG, "SensorRecorder loop: " + (T_stop - T_start) + " msec");
       
       // sleep until next sampling period
       T_sleep = SAMPLING_INTERVAL_MS - (T_stop - T_start);
@@ -196,7 +194,7 @@ public class SensorRecorder extends Thread {
     // attempt to close sensors
     try {
       closeCoreTemperatureFiles();
-      mAgilentPort.close();
+      mAgilentSamplerThread.terminate();
     } catch (IOException e) {
       Log.e(e.getClass().toString(), e.getMessage(), e);
     }
@@ -207,38 +205,42 @@ public class SensorRecorder extends Thread {
   private TestbedTemperatures sampleSensors() {
     TestbedTemperatures dataSample = new TestbedTemperatures();
     float tcplVoltage = 0.f;
-    
+
+    long T0 = 0, T1 = 0;
+
+    // sample thermocouple sensor
     try {
       tcplVoltage = readAgilentPort();
-    } catch (NumberFormatException e) {
-      Log.w("sampleSensors", "readAgilentPort() returned bad format.");
-    } catch (NullPointerException e) {
-      Log.e(e.getClass().toString(), e.getMessage(), e);
-      Log.w("sampleSensors", "Attempting to re-open Agilent port ...");
+      //tcplVoltage = 0.0013f;
+    } catch (IOException e) {
+      Log.w("sampleSensors", e.getMessage());
+      Log.i("sampleSensors", "Attempting to re-open Agilent port ...");
+
+      if (mAgilentSamplerThread != null) {
+        mAgilentSamplerThread.terminate();
+      }
       
       // attempt to re-open serial port
       try {
-        mAgilentPort.close();
         openAgilentPort();
       } catch (IOException e1) {
-        Log.e(e1.getClass().toString(), e1.getMessage(), e1);
+        Log.w("sampleSensors", e1.getMessage());
       }
       
-    } catch (IOException e) {
-      Log.w("sampleSensors", "readAgilentPort() returned bad format.");
     }
     
     long timestamp = System.currentTimeMillis();
     
     // sample CPU temperature sensors
+    //T0 = System.currentTimeMillis();
     dataSample.timestamp = timestamp;
     dataSample.temperatureCore0 = readCoreTemperature(0);
     dataSample.temperatureCore1 = readCoreTemperature(1);
     dataSample.temperatureCore2 = readCoreTemperature(2);
     dataSample.temperatureCore3 = readCoreTemperature(3);
     dataSample.temperatureAmbient = mAmbientTemperature;
-    
-    // sample thermocouple sensor
+    //T1 = System.currentTimeMillis();
+
     try {
       dataSample.temperatureThermocouple = Thermocouple.voltsToCelsius(tcplVoltage) + mAmbientTemperature;
       //dataSample.temperatureThermocouple = tcplVoltage;
@@ -247,7 +249,7 @@ public class SensorRecorder extends Thread {
       Log.e(e.getClass().toString(), e.getMessage(), e);
       dataSample.temperatureThermocouple = 0.f;
     }
-    
+
     // calculate average core temperature
     float cpuTemperature = (float)(
         dataSample.temperatureCore0 + 
@@ -279,6 +281,7 @@ public class SensorRecorder extends Thread {
     
     
     // keep a 2nd pcm counter that caps at PCM_ENERGY_MAX
+    // and incorporates freezing
     if (!mPCMMelted && (pcmTemperature < PCM_MELTING_TEMP)) {
       mPCMEnergy_Saturated = 0.f;
     } else if (!mPCMMelted) {
@@ -295,10 +298,11 @@ public class SensorRecorder extends Thread {
         mPCMMelted = false;
       }
     }
-    
 
-    Log.v(TAG, 
+
+    Log.v(TAG,
         "T_CPU=" + String.format("%.2f", cpuTemperature) + ", " +
+        //"T_CPU=" + dataSample.temperatureCore0 + ", " +
         "T_PCM=" + String.format("%.2f", pcmTemperature) + ", " +
         "E_PCM=" + String.format("%6.2f", mPCMEnergy)    + " (" + String.format("%.2f", mPCMEnergy_Saturated) + "), " +
         "P_net=" + String.format("%6.3f", netPower)      + ", " +
@@ -472,90 +476,21 @@ public class SensorRecorder extends Thread {
       mAgilentPort.setParameters(19200, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
       mAgilentPort.purgeHwBuffers(true, true);
     }
+
+    mAgilentSamplerThread = new AgilentSampler(mAgilentPort);
+    mAgilentSamplerThread.start();
   }
   
-  private float readAgilentPort() throws NullPointerException, IOException, NumberFormatException {
-    if (mAgilentPort == null) {
-      throw new NullPointerException("Agilent port not ready!");
-    }
-    
-    //long T0 = System.currentTimeMillis();
-    
-    int numReads = 0;
-    int wordBufferIndex = 0;
+  private float readAgilentPort() throws IOException {
     float voltage = 0.f;
-    
-    byte[] wordBuffer = new byte[AGILENT_WORD_BUFFER_LENGTH];
-    Arrays.fill(wordBuffer, (byte)0);
-    
-    while (wordBufferIndex < AGILENT_WORD_BUFFER_LENGTH) {
-      byte[] serialReadBuffer = new byte[AGILENT_READ_BUFFER_LENGTH];
-      
-      // read incoming data
-      int bytesRead = 0;
-      bytesRead = mAgilentPort.read(serialReadBuffer, 400);
-      numReads++;
-      
-      // continue processing if you've read something
-      if (bytesRead > 0) {
-        int wordBufferEndIndex = Math.min(wordBufferIndex + bytesRead, AGILENT_WORD_BUFFER_LENGTH);
-        for (int i = wordBufferIndex; i < wordBufferEndIndex; i++) {
-          wordBuffer[i] = serialReadBuffer[i - wordBufferIndex];
-        }
-        wordBufferIndex = wordBufferEndIndex;
-        
-        if (wordBufferIndex >= AGILENT_WORD_BUFFER_LENGTH) {
-          byte[] dataSampleBuffer = parseAgilentBuffer(wordBuffer);
-          
-          mAgilentPort.purgeHwBuffers(true, true);
-          
-          if (dataSampleBuffer != null) {
-            String dataSampleString = new String(dataSampleBuffer, "UTF-8");
-              
-            // parse string into float
-            voltage = Float.parseFloat(dataSampleString);
-            
-          } else {
-            throw new IOException("Unable to parse data buffer.");
-          }
-        }
-      }
-    } // while (!terminate)
-    
-    //long T1 = System.currentTimeMillis();
-    //Log.d("readAgilentPort", "Time: " + (T1 - T0) + "ms, RX:" + numReads + ", volts=" + String.format("%.6f", voltage));
-    
-    return voltage;
-  }
-  
-  private byte[] parseAgilentBuffer(byte[] wordBuffer) {
-    int startByteIndex = -1;
-    int stopByteIndex = -1;
-    byte[] parsedBuffer = null;
-    
-    for (int i = 0; i < AGILENT_WORD_BUFFER_LENGTH; i++) {
-      if (wordBuffer[i] == AGILENT_START_BYTE) {
-        startByteIndex = i;
-      }
-      
-      if (startByteIndex > 0 && wordBuffer[i] == AGILENT_STOP_BYTE) {
-        stopByteIndex = i;
-        break;
-      }
-    }
-    
-    if (startByteIndex > 0 && stopByteIndex > startByteIndex) {
-      int wordSize = stopByteIndex - startByteIndex - 1;
-      
-      if (wordSize > 0) {
-        parsedBuffer = Arrays.copyOfRange(wordBuffer, startByteIndex+1, stopByteIndex);
-      }
+    if (mAgilentSamplerThread == null) {
+      throw new IOException("AgilentSampler not ready!");
     }
 
-    return parsedBuffer;
+    voltage = mAgilentSamplerThread.getSample();
+    return voltage;
   }
-  
-  
+
   public synchronized void terminate() {
     mTerminate = true;
   }
@@ -586,6 +521,11 @@ public class SensorRecorder extends Thread {
   
   public synchronized void setAgilentDevice(UsbDevice device) {
     mAgilentDevice = device;
+
+    if (mAgilentDevice == null && mAgilentSamplerThread != null) {
+      mAgilentSamplerThread.terminate();
+      mAgilentSamplerThread = null;
+    }
   }
   
   public synchronized UsbDevice getAgilentDevice() {
@@ -594,5 +534,174 @@ public class SensorRecorder extends Thread {
   
   public synchronized TestbedTemperatures getCurrentTestbedTemperatures() {
     return mCurrentTestbedTemperatures;
+  }
+
+  private class AgilentSampler extends Thread {
+    private final String TAG = "AgilentSampler";
+
+    // set the sampling interval, in milliseconds.
+    // note, the serial communication with the Agilent multimeter
+    // is slow. reading a full voltage value takes about 300-400 msec.
+    // I suspect this may be due to a sloppy serial port interface
+    // (the hoho.android.usbserial package).
+    private static final int SAMPLING_INTERVAL_MS = 1000;
+
+    private static final int AGILENT_WORD_BUFFER_LENGTH = 40; // in bytes
+    private static final int AGILENT_READ_BUFFER_LENGTH = 8; // in bytes
+    private static final byte AGILENT_START_BYTE = 0x0A;
+    private static final byte AGILENT_STOP_BYTE = 0x0D;
+
+    private UsbSerialPort mAgilentPort;
+
+    private boolean mTerminate;
+
+    private volatile float mSample;
+
+    public AgilentSampler(UsbSerialPort agilentPort) {
+      this.mAgilentPort = agilentPort;
+      mTerminate = false;
+      mSample = 0.f;
+    }
+
+    public void run() {
+      long T_start = 0;
+      long T_stop = 0;
+      long T_sleep = 0;
+      long T_prev = System.currentTimeMillis();
+
+      Log.v(TAG, "Starting AgilentSampler thread");
+
+      while (!mTerminate) {
+        // start loop
+        T_start = System.currentTimeMillis();
+        mSampleTime = (T_start - T_prev) / 1000.f;
+
+        // check port
+        if (mAgilentPort == null) {
+          Log.w(TAG, "Agilent port not ready!");
+
+        } else {
+          int numReads = 0;
+          int wordBufferIndex = 0;
+          float voltage = 0.f;
+
+          byte[] wordBuffer = new byte[AGILENT_WORD_BUFFER_LENGTH];
+          Arrays.fill(wordBuffer, (byte)0);
+
+          while (wordBufferIndex < AGILENT_WORD_BUFFER_LENGTH) {
+            byte[] serialReadBuffer = new byte[AGILENT_READ_BUFFER_LENGTH];
+
+            // read incoming data
+            int bytesRead = 0;
+            try {
+              bytesRead = mAgilentPort.read(serialReadBuffer, 100);
+            } catch (IOException e) {
+              Log.e(e.getClass().toString(), e.getMessage(), e);
+            }
+            numReads++;
+
+            // continue processing if you've read something
+            if (bytesRead > 0) {
+
+              // append the bytes read to the word buffer
+              int freeBytes = AGILENT_WORD_BUFFER_LENGTH - wordBufferIndex;
+              bytesRead = (bytesRead > freeBytes) ? freeBytes : bytesRead;
+              System.arraycopy(serialReadBuffer, 0, wordBuffer, wordBufferIndex, bytesRead);
+              wordBufferIndex += bytesRead;
+
+              // when buffer full, parse the word buffer
+              if (wordBufferIndex >= AGILENT_WORD_BUFFER_LENGTH) {
+                byte[] dataSampleBuffer = parseAgilentBuffer(wordBuffer);
+
+                try {
+                  mAgilentPort.purgeHwBuffers(true, true);
+                } catch (IOException e) {
+                  Log.e(e.getClass().toString(), e.getMessage(), e);
+                }
+
+                if (dataSampleBuffer != null) {
+                  String dataSampleString = new String(dataSampleBuffer);
+
+                  // parse string into float
+                  try {
+                    voltage = Float.parseFloat(dataSampleString);
+                    setSample(voltage);
+                  } catch (NumberFormatException e) {
+                    Log.w(TAG, "Unable to parse Agilent buffer!");
+                  }
+
+                }
+              }
+            }
+          } // while (!terminate)
+        }
+
+        // wrap up
+        T_stop = System.currentTimeMillis();
+        T_prev = T_start;
+
+        //Log.d(TAG, "AgilentSampler loop: " + (T_stop - T_start) + " msec");
+
+        // sleep until next sampling period
+        T_sleep = SAMPLING_INTERVAL_MS - (T_stop - T_start);
+        T_sleep = (T_sleep < 0) ? 0 : T_sleep;
+        try {
+          Thread.sleep(T_sleep);
+        } catch (InterruptedException e) {
+          Log.e(e.getClass().toString(), e.getMessage(), e);
+        }
+      }
+
+      try {
+        mAgilentPort.close();
+      } catch (IOException e) {
+        Log.e(e.getClass().toString(), e.getMessage(), e);
+      }
+
+      Log.v(TAG, "Terminated AgilentSampler thread");
+    }
+
+    private byte[] parseAgilentBuffer(byte[] wordBuffer) {
+      int startByteIndex = -1;
+      int stopByteIndex = -1;
+      byte[] parsedBuffer = null;
+
+      for (int i = 0; i < AGILENT_WORD_BUFFER_LENGTH; i++) {
+        if (wordBuffer[i] == AGILENT_START_BYTE) {
+          startByteIndex = i;
+        }
+
+        if (startByteIndex > 0 && wordBuffer[i] == AGILENT_STOP_BYTE) {
+          stopByteIndex = i;
+          break;
+        }
+      }
+
+      if (startByteIndex > 0 && stopByteIndex > startByteIndex) {
+        int wordSize = stopByteIndex - startByteIndex - 1;
+
+        if (wordSize > 0) {
+          parsedBuffer = Arrays.copyOfRange(wordBuffer, startByteIndex+1, stopByteIndex);
+        }
+      }
+
+      return parsedBuffer;
+    }
+
+    public synchronized void terminate() {
+      mTerminate = true;
+    }
+
+    public synchronized float getSample() {
+      return mSample;
+    }
+
+    private synchronized void  setSample(float sample) {
+      mSample = sample;
+    }
+
+    public void setAgilentPort(UsbSerialPort agilentPort) {
+      this.mAgilentPort = agilentPort;
+    }
   }
 }

@@ -35,7 +35,7 @@
                 android:textColor="@color/white" />
 
             <EditText
-                android:id="@+id/editText_cores"
+                android:id="@+id/editText_threads"
                 android:layout_width="@dimen/editText_cores_width"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -56,7 +56,7 @@
         </LinearLayout>
 
         <SeekBar
-            android:id="@+id/seekBar_cores"
+            android:id="@+id/seekBar_threads"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="@integer/max_cores"

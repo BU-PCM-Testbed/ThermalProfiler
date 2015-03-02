@@ -66,7 +66,7 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
   // Set to false to enable continuous benchmark: When you press the Benchmark
   // button, the benchmark will run forever, until you press the Benchmark button
   // again, to interrupt and stop the benchmark.
-  private static final boolean TIMED_BENCHMARK = false;
+  private static final boolean TIMED_BENCHMARK = true;
 
 
   // Set to true to allow the Benchmark thread to set the frequency of the CPU
@@ -129,6 +129,9 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
   // USB Device constants
   private static final String ACTION_USB_PERMISSION = "com.testbed.thermalprofiler.USB_PERMISSION";
 
+  // intent strings
+  private static final String ACTION_TPROF_COMMAND = "com.testbed.peaclab.action.TPROF_COMMAND";
+
   // fields for the Agilent U1252A USB device
   private static final int AGILENT_U1252A_VENDOR_ID = 0x067B;
   private static final int AGILENT_U1252A_PRODUCT_ID = 0x2303;
@@ -151,17 +154,21 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
   // USB device fields
   private UsbManager mUsbManager;
   private ArrayList<UsbDevice> mUsbDevices = new ArrayList<UsbDevice>();
-  private PendingIntent mUsbPermissionIntent;
 
   // this USB device corresponds to the Agilent U1252A multimeter, which
   // uses a Prolific serial port interface.
   private UsbDevice mAgilentDevice = null;
   private boolean mAgilentDevicePermission = false;
 
+  /* ***********************************************************************/
+  // BROADCAST INTENT RECEIVERS
+  /* ***********************************************************************/
+
   /**
    * Receives broadcast when a supported USB device is attached, detached or
    * when a permission to communicate to the device has been granted.
    */
+  private PendingIntent mUsbPermissionIntent;
   private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -213,6 +220,79 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
     }
   };
 
+  /**
+   * Receives broadcast when a ThermalProfiler command intent is received.
+   */
+  private PendingIntent mCommandIntent;
+  private final BroadcastReceiver mCommandReceiver = new BroadcastReceiver() {
+    private final String TPROF_EXTRA_KEY_COMMAND = "command";
+    private final String TPROF_EXTRA_KEY_AMBIENT = "ambient";
+    private final String TPROF_EXTRA_KEY_THREADS = "threads";
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      String action = intent.getAction();
+
+      if (action.equalsIgnoreCase(ACTION_TPROF_COMMAND)) {
+        if (intent.hasExtra(TPROF_EXTRA_KEY_COMMAND)) {
+          String command = intent.getStringExtra(TPROF_EXTRA_KEY_COMMAND);
+          ToggleButton toggleButton;
+          Button button;
+
+          // handle toggling Record
+          if (command.equalsIgnoreCase("record")) {
+            toggleButton = (ToggleButton) findViewById(R.id.toggleButton_record);
+            toggleButton.toggle();
+            buttonRecord((View)toggleButton);
+          }
+
+          // handle toggling Benchmark
+          else if (command.equalsIgnoreCase("benchmark")) {
+            toggleButton = (ToggleButton) findViewById(R.id.toggleButton_benchmark);
+            toggleButton.toggle();
+            buttonBenchmark((View)toggleButton);
+          }
+
+          // handle pressing Ambient Temp (increase)
+          else if (command.equalsIgnoreCase("ambient_inc")) {
+            button = (Button) findViewById(R.id.button_ambientPlus);
+            buttonAmbientPlus((View)button);
+          }
+
+          // handle pressing Ambient Temp (decrease)
+          else if (command.equalsIgnoreCase("ambient_dec")) {
+            button = (Button) findViewById(R.id.button_ambientMinus);
+            buttonAmbientMinus((View)button);
+          }
+
+          // handle pressing Debug
+          else if (command.equalsIgnoreCase("debug")) {
+            button = (Button) findViewById(R.id.button_debugFn);
+            debugFunction((View)button);
+          }
+        } // has TPROF_EXTRA_KEY_COMMAND
+
+        if (intent.hasExtra(TPROF_EXTRA_KEY_AMBIENT)) {
+          float ambientTemp = intent.getFloatExtra(TPROF_EXTRA_KEY_AMBIENT, DEFAULT_AMBIENT_TEMP);
+          editTextAmbientSet(ambientTemp);
+        } // has TPROF_EXTRA_KEY_AMBIENT
+
+        if (intent.hasExtra(TPROF_EXTRA_KEY_THREADS)) {
+          SeekBar seekBar_threads = (SeekBar) findViewById(R.id.seekBar_threads);
+          int numThreads = intent.getIntExtra(TPROF_EXTRA_KEY_THREADS, Testbed.TESTBED_NUM_CPU_CORES_MIN);
+          seekBar_threads.setProgress(numThreads);
+        } // has TPROF_EXTRA_KEY_THREADS
+
+      }
+
+      //debugLogMessage("ACTION: " + action + ", EXTRA: " + command);
+    }
+  };
+
+  /* ***********************************************************************/
+  // ENTRY POINT
+  /* ***********************************************************************/
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -230,20 +310,27 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
     // disable on-screen keyboard
     this.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
 
-    SeekBar seekBar_cores = (SeekBar) findViewById(R.id.seekBar_cores);
+    SeekBar seekBar_cores = (SeekBar) findViewById(R.id.seekBar_threads);
     seekBar_cores.setOnSeekBarChangeListener(this);
 
     // Get UsbManager from Android.
     mUsbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 
-    // handle Intents
+    // handle USB intents
     mUsbPermissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
-    IntentFilter filter = new IntentFilter();
-    filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-    filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
-    filter.addAction(ACTION_USB_PERMISSION);
-    registerReceiver(mUsbReceiver, filter);
+    IntentFilter usbFilter = new IntentFilter();
+    usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+    usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+    usbFilter.addAction(ACTION_USB_PERMISSION);
+    registerReceiver(mUsbReceiver, usbFilter);
 
+    // handle ThermalProfiler command intents
+    mCommandIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_TPROF_COMMAND), 0);
+    IntentFilter cmdFilter = new IntentFilter();
+    cmdFilter.addAction(ACTION_TPROF_COMMAND);
+    registerReceiver(mCommandReceiver, cmdFilter);
+
+    // initialize USB device list
     mUsbDevices.clear();
     for (UsbDevice device : mUsbManager.getDeviceList().values()) {
       //Log.d("onCreate", "Detected device: " + device.toString());
@@ -397,8 +484,8 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
     }
 
     // show the number of selected cores
-    EditText editText_cores = (EditText) findViewById(R.id.editText_cores);
-    editText_cores.setText(Integer.toString(progress));
+    EditText editText_threads = (EditText) findViewById(R.id.editText_threads);
+    editText_threads.setText(Integer.toString(progress));
   }
 
 
@@ -448,10 +535,10 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
   //--------------------------------------------------------------------------
   public void buttonBenchmark(View view) {
     ToggleButton toggleButton_benchmark = (ToggleButton) view;
-    SeekBar seekBar_cores = (SeekBar) findViewById(R.id.seekBar_cores);
+    SeekBar seekBar_threads = (SeekBar) findViewById(R.id.seekBar_threads);
 
     // check how many cores have been selected
-    int numThreads = seekBar_cores.getProgress();
+    int numThreads = seekBar_threads.getProgress();
 
     //
     // handle case when button is ON:
@@ -507,17 +594,7 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
     ambientTemp = Math.round(ambientTemp * 10.f) * 0.1f;
 
     // display ambient
-    EditText editText_ambient = (EditText) findViewById(R.id.editText_ambient);
-    editText_ambient.setText(String.format("%.1f", ambientTemp));
-
-    mSensorRecorderThread.setAmbientTemperature(ambientTemp);
-
-    // save ambient temperature
-    try {
-      writeAmbientTempFile();
-    } catch (IOException e) {
-      Log.e(e.getClass().toString(), e.getMessage(), e);
-    }
+    editTextAmbientSet(ambientTemp);
   }
 
   //
@@ -530,6 +607,10 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
     ambientTemp = Math.round(ambientTemp * 10.f) * 0.1f;
 
     // display ambient
+    editTextAmbientSet(ambientTemp);
+  }
+
+  public void editTextAmbientSet(float ambientTemp) {
     EditText editText_ambient = (EditText) findViewById(R.id.editText_ambient);
     editText_ambient.setText(String.format("%.1f", ambientTemp));
 
@@ -780,7 +861,7 @@ public class Executive extends Activity implements SeekBar.OnSeekBarChangeListen
 
     private int m_ThreadNumber = 0;
 
-    private static final long IDLE_DELAY_MS = 20 * 1000;
+    private static final long IDLE_DELAY_MS = 5 * 1000;
 
     @Override
     protected TimeInterval doInBackground(Integer... params) {
